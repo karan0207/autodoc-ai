@@ -10,48 +10,33 @@ logger = logging.getLogger(__name__)
 async def get_stats(job_id: str = None):
     """Get statistics about what's stored in the vector database"""
     try:
+        logger.info("🔍 Debug stats request started...")
         vector_store = VectorStore()
+        logger.info("✅ Connected to vector store")
         
-        # Get collection
-        collection = vector_store.client.collections.get(vector_store.collection_name)
+        # Get total count
+        total_count = len(vector_store.chunks)
+        logger.info(f"Total chunks in store: {total_count}")
         
-        # Run aggregate in thread pool
-        aggregate = await asyncio.get_running_loop().run_in_executor(
-            None,
-            lambda: collection.aggregate.over_all(total_count=True)
-        )
-        
-        total_count = aggregate.total_count
-        
-        # Get some sample objects
+        # Filter samples by job_id if provided
         if job_id:
-            # Filter by job_id
-            import weaviate.classes.query as wvc_query
-            response = await asyncio.get_running_loop().run_in_executor(
-                None,
-                lambda: collection.query.fetch_objects(
-                    limit=5,
-                    filters=wvc_query.Filter.by_property("job_id").equal(job_id)
-                )
-            )
+            samples_data = [c for c in vector_store.chunks if c.get("job_id") == job_id][:5]
+            logger.info(f"Found {len(samples_data)} samples for job_id: {job_id}")
         else:
-            # Get all
-            response = await asyncio.get_running_loop().run_in_executor(
-                None,
-                lambda: collection.query.fetch_objects(limit=5)
-            )
+            samples_data = vector_store.chunks[:5]
         
         samples = [
             {
-                "job_id": obj.properties.get("job_id"),
-                "source": obj.properties.get("source"),
-                "url": obj.properties.get("url"),
-                "content_preview": obj.properties.get("content", "")[:100]
+                "job_id": chunk.get("job_id"),
+                "source": chunk.get("source"),
+                "url": chunk.get("url"),
+                "content_preview": chunk.get("content", "")[:100]
             }
-            for obj in response.objects
+            for chunk in samples_data
         ]
         
         vector_store.close()
+        logger.info("✅ Debug stats completed successfully")
         
         return {
             "total_documents": total_count,
@@ -59,5 +44,5 @@ async def get_stats(job_id: str = None):
             "filtered_by_job_id": job_id
         }
     except Exception as e:
-        logger.error(f"Debug stats failed: {e}")
-        return {"error": str(e)}
+        logger.error(f"❌ Debug stats failed: {e}", exc_info=True)
+        return {"error": str(e), "total_documents": 0, "samples": []}
